@@ -1,0 +1,10 @@
+# Railway.app için deployment dosyası
+# Telegram botu 7/24 burada çalışır (ücretsiz tier: 500 saat/ay)
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python telegram_bot.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

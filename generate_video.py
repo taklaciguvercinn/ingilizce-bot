@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Video Bot English v2"""
+"""Video Bot English v3"""
 
 import sys,os,json,time,requests,subprocess,re,struct,math,hashlib
 from datetime import datetime
@@ -39,7 +39,6 @@ def tg_photo(path, caption):
     except: pass
 
 def parse_command(cmd):
-    # Format: Topic,Music,Minutes,Images,DD.MM.YYYY,HH:MM
     p = [x.strip() for x in cmd.strip().split(",")]
     if len(p) != 6:
         raise ValueError("Format: Topic,Music,Minutes,Images,DD.MM.YYYY,HH:MM")
@@ -99,7 +98,7 @@ def parse_json(raw):
     if "title" in data: return data
     raise Exception(f"JSON parse failed: {raw[:60]}")
 
-# ─── CONTENT GENERATION ──────────────────────────────────────────────────────
+# ─── CONTENT ─────────────────────────────────────────────────────────────────
 def generate_content(topic, duration, img_count):
     tg(f"Generating content for '{topic}'...","📚")
     word_target = duration * 150
@@ -111,6 +110,7 @@ def generate_content(topic, duration, img_count):
         "viking": ["Viking longship stormy ocean dramatic","Norse village wooden houses snow landscape","Scandinavian fjord epic landscape"],
         "roman": ["ancient Roman Colosseum architecture epic","Roman legionnaire fortress dramatic lighting","ancient Rome Forum ruins golden hour"],
         "napoleon": ["Napoleonic battlefield epic landscape","French Empire palace architecture dramatic","19th century European fortress dramatic"],
+        "hitler": ["World War 2 battlefield dramatic landscape","ruins of war dramatic moody atmosphere","wartime bunker dramatic cinematic"],
         "space": ["deep space nebula galaxy ultra detailed","space station orbit Earth dramatic lighting","cosmos cinematic dramatic"],
         "nature": ["tropical rainforest waterfall dramatic light","mountain glacier landscape epic dramatic","ocean waves cliffs cinematic dramatic"],
         "world war": ["World War battlefield dramatic landscape","military fortress ruins dramatic atmosphere","wartime landscape dramatic moody"],
@@ -196,25 +196,6 @@ Begin the {topic} documentary narration now:"""
     return meta
 
 # ─── MUSIC ───────────────────────────────────────────────────────────────────
-def find_music(music_hint):
-    """music_hint ile repodaki MP3'leri eşleştir"""
-    repo_root = Path(os.environ.get("GITHUB_WORKSPACE", "."))
-    all_mp3 = list(repo_root.glob("*.mp3"))
-
-    if not all_mp3:
-        return None
-
-    # Özel karakterleri temizleyerek karşılaştır
-    def clean(s):
-        return re.sub(r"[^a-z0-9]", "", s.lower())
-
-    hint_clean = clean(music_hint)
-
-    for mp3 in all_mp3:
-        if hint_clean in clean(mp3.name):
-            return mp3
-    return None
-
 def generate_music(topic, duration_sec, music_hint=""):
     tg("Loading music...","🎵")
     repo_root = Path(os.environ.get("GITHUB_WORKSPACE", "."))
@@ -224,26 +205,22 @@ def generate_music(topic, duration_sec, music_hint=""):
         tg("No MP3 files in repo!","⚠")
         return _synth_music_fallback(topic, duration_sec)
 
+    def clean(s):
+        return re.sub(r"[^a-z0-9]","",s.lower())
+
     chosen = None
 
-    # 1. Önce music_hint ile ara
-    def clean(s):
-        return re.sub(r"[^a-z0-9]", "", s.lower())
-
-    hint_clean = clean(music_hint)
-
-    if hint_clean:
+    if music_hint:
+        hint_clean = clean(music_hint)
         for mp3 in all_mp3:
             if hint_clean in clean(mp3.name):
-                chosen = mp3
-                break
+                chosen = mp3; break
         if not chosen:
-            tg(f"Hint '{music_hint}' not found, using category match...","⚠")
+            tg(f"Hint '{music_hint}' not found, using category...","⚠")
 
-    # 2. Hint bulunamazsa kategori bazlı ara (dosya ismindeki etiketlere göre)
     if not chosen:
         k = topic.lower()
-        if any(x in k for x in ["war","battle","viking","roman","ottoman","medieval","napoleon","soldier","crusade"]):
+        if any(x in k for x in ["war","battle","viking","roman","ottoman","medieval","napoleon","soldier","crusade","hitler"]):
             cat_tag = "war"
         elif any(x in k for x in ["egypt","ancient","greek","sumerian","babylon","pharaoh","rome","persia"]):
             cat_tag = "ancient"
@@ -260,13 +237,12 @@ def generate_music(topic, duration_sec, music_hint=""):
                 seed = int(hashlib.md5(topic.encode()).hexdigest()[:8],16)
                 chosen = matches[seed % len(matches)]
 
-    # 3. Hâlâ bulunamazsa rastgele bir MP3
     if not chosen:
         seed = int(hashlib.md5(topic.encode()).hexdigest()[:8],16)
         chosen = all_mp3[seed % len(all_mp3)]
         tg(f"Random music: {chosen.name}","⚠")
 
-    tg(f"Music: <b>{chosen.name}</b>","✅")
+    tg(f"Music: <b>{chosen.name}</b> ({chosen.stat().st_size//1024}KB)","✅")
     return str(chosen)
 
 def _synth_music_fallback(topic, duration_sec):
@@ -375,7 +351,7 @@ def generate_thumbnail(prompt, text, color, topic):
     tg("Thumbnail ready!","✅")
     return str(final)
 
-# ─── AUDIO + SUBTITLES ───────────────────────────────────────────────────────
+# ─── AUDIO ───────────────────────────────────────────────────────────────────
 def generate_audio(script):
     tg("Generating English narration...","🎙")
     sf=WORK/"script.txt"; rf=WORK/"audio_raw.mp3"
@@ -428,10 +404,10 @@ def mix_audio(narration, music, duration):
     mixed=WORK/"mixed.mp3"
     cmd=["ffmpeg","-y",
          "-i",narration,
-         "-stream_loop","-1","-i",music,
+         "-stream_loop","-1","-i",str(music_path),
          "-filter_complex",
          "[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a1];"
-         "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.35[a2];"
+         "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.20[a2];"
          "[a1][a2]amix=inputs=2:duration=first:weights=1 0.6[aout]",
          "-map","[aout]",
          "-c:a","libmp3lame","-b:a","192k",
@@ -441,31 +417,27 @@ def mix_audio(narration, music, duration):
     if r.returncode==0 and mixed.exists() and mixed.stat().st_size>50000:
         tg(f"Music mixed! ({mixed.stat().st_size//1024}KB)","✅")
         return str(mixed)
-    tg("Mix failed, continuing without music","⚠")
+    tg(f"Mix failed: {r.stderr[-80:]}","⚠")
     return narration
 
 # ─── VIDEO ASSEMBLY ───────────────────────────────────────────────────────────
 def assemble_video(images, audio, subtitle_srt, total_duration):
-    tg(f"Assembling video...\n{len(images)} images | smooth effects\n⏳ ~{len(images)//2+5} min","🎬")
+    tg(f"Assembling video...\n{len(images)} images | fade + flash effects\n⏳ ~{len(images)//2+5} min","🎬")
 
     img_dur = total_duration / len(images)
     fps = 30
+    fade_dur = 0.8  # saniye - geçiş süresi
 
-    # Smooth zoompan efektleri - fps=30, yüksek d değeri
     def make_effect(idx, frames):
         effects = [
-            # Zoom in - smooth
-            f"zoompan=z='min(zoom+0.0003,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
-            # Zoom out - smooth
-            f"zoompan=z='if(lte(zoom,1.0),1.25,max(1.0,zoom-0.0003))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
-            # Pan left to right - smooth
-            f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)+((iw*0.1/zoom)*on/{frames})':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
-            # Pan right to left - smooth
-            f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)+((iw*0.1/zoom)*(1-on/{frames}))':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
-            # Pan up - smooth
-            f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)+((ih*0.08/zoom)*on/{frames})':d={frames}:s=1920x1080:fps={fps}",
-            # Pan down - smooth
-            f"zoompan=z='1.15':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)+((ih*0.08/zoom)*(1-on/{frames}))':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.0+(0.12*on/{frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.12-(0.12*on/{frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.10':x='(iw*0.05)-(iw*0.05*on/{frames})':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.10':x='iw*0.05*on/{frames}':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.10':x='iw/2-(iw/zoom/2)':y='(ih*0.04)-(ih*0.04*on/{frames})':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.10':x='iw/2-(iw/zoom/2)':y='ih*0.04*on/{frames}':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.0':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
+            f"zoompan=z='1.0+(0.10*on/{frames})':x='(iw*0.03)-(iw*0.03*on/{frames})':y='ih/2-(ih/zoom/2)':d={frames}:s=1920x1080:fps={fps}",
         ]
         return effects[idx % len(effects)]
 
@@ -474,7 +446,23 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
         clip = WORK/f"clip_{idx:02d}.mp4"
         frames = int(img_dur * fps)
         eff = make_effect(idx, frames)
-        vf = f"{eff},vignette=PI/4,format=yuv420p"
+
+        # Her 4 sahnede bir ışık parlaması efekti
+        flash = (idx % 4 == 3)
+        if flash:
+            # Işık parlaması: ortada parlama, sonra normale dön
+            vf = (f"{eff},"
+                  f"vignette=PI/4,"
+                  f"curves=all='0/0 0.3/0.3 0.5/1.0 0.7/0.7 1/1'[base];"
+                  f"[base]fade=t=in:st=0:d=0.3:color=white,"
+                  f"fade=t=out:st={img_dur-0.3:.2f}:d=0.3,"
+                  f"format=yuv420p")
+        else:
+            vf = (f"{eff},"
+                  f"vignette=PI/4,"
+                  f"fade=t=in:st=0:d={fade_dur},"
+                  f"fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur},"
+                  f"format=yuv420p")
 
         r=subprocess.run(["ffmpeg","-y","-loop","1","-i",img,
             "-vf", vf,
@@ -485,7 +473,7 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
             capture_output=True, text=True, timeout=300)
         if r.returncode==0 and clip.exists():
             clips.append(str(clip))
-            tg(f"Clip {idx+1}/{len(images)} ✓","🎞")
+            tg(f"Clip {idx+1}/{len(images)} {'⚡' if flash else '✓'}","🎞")
         else:
             tg(f"Clip {idx+1} failed: {r.stderr[-60:]}","⚠")
 
@@ -524,7 +512,7 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
     tg(f"Video ready! {size_mb}MB","✅")
     return str(final_video)
 
-# ─── YOUTUBE UPLOAD ───────────────────────────────────────────────────────────
+# ─── YOUTUBE ─────────────────────────────────────────────────────────────────
 def get_access_token():
     r=requests.post("https://oauth2.googleapis.com/token",data={
         "client_id":YOUTUBE_CLIENT_ID,"client_secret":YOUTUBE_CLIENT_SECRET,
@@ -556,7 +544,6 @@ def upload_youtube(video_path, meta, publish_iso):
         json=body,timeout=30)
     upload_url = r.headers.get("Location","")
     if not upload_url: raise Exception(f"No upload URL: {r.text[:100]}")
-
     with open(video_path,"rb") as f: video_data = f.read()
     r2=requests.put(upload_url,headers={"Content-Type":"video/mp4"},data=video_data,timeout=1800)
     if r2.status_code not in [200,201]: raise Exception(f"Upload failed: {r2.text[:100]}")
@@ -578,10 +565,8 @@ def upload_thumbnail(vid_id, thumb_path):
 def main():
     if len(sys.argv) < 2:
         tg("No command received","⚠"); sys.exit(1)
-
     cmd = " ".join(sys.argv[1:])
     tg(f"Command: <b>{cmd}</b>","🚀")
-
     try:
         params = parse_command(cmd)
     except Exception as e:
@@ -593,23 +578,21 @@ def main():
     img_count  = params["img_count"]
     pub_iso    = params["publish_iso"]
 
-    tg(f"<b>{topic}</b> | {duration} min | {img_count} images\n🎵 Music hint: {music_hint}\n📅 {pub_iso}","📋")
+    tg(f"<b>{topic}</b> | {duration} min | {img_count} images\n🎵 Music: {music_hint}\n📅 {pub_iso}","📋")
 
     try:
-        meta = generate_content(topic, duration, img_count)
-        music = generate_music(topic, duration*60, music_hint)
-        images = generate_images(meta["image_prompts"], topic)
+        meta        = generate_content(topic, duration, img_count)
+        music       = generate_music(topic, duration*60, music_hint)
+        images      = generate_images(meta["image_prompts"], topic)
         generate_thumbnail(meta["thumbnail_prompt"], meta["thumbnail_text"], meta["color"], topic)
         audio, audio_dur, subtitle_srt = generate_audio(meta["script"])
         final_audio = mix_audio(audio, music, audio_dur)
-        video = assemble_video(images, final_audio, subtitle_srt, audio_dur)
-        vid_id = upload_youtube(video, meta, pub_iso)
+        video       = assemble_video(images, final_audio, subtitle_srt, audio_dur)
+        vid_id      = upload_youtube(video, meta, pub_iso)
         upload_thumbnail(vid_id, str(WORK/"thumbnail.jpg"))
         tg(f"✅ DONE!\nyoutube.com/watch?v={vid_id}","🎬")
-
     except Exception as e:
-        tg(f"Fatal error: {str(e)[:200]}","❌")
-        sys.exit(1)
+        tg(f"Fatal error: {str(e)[:200]}","❌"); sys.exit(1)
 
 if __name__ == "__main__":
     main()

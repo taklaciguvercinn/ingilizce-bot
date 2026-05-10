@@ -447,15 +447,15 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
         frames = int(img_dur * fps)
         eff = make_effect(idx, frames)
 
-        # Her 4 sahnede bir ışık parlaması efekti
+        # Her 4 sahnede bir renkli ışık parlaması
+        flash_colors = ["white", "0x4444ff", "0xff2222"]  # beyaz, mavi, kırmızı
         flash = (idx % 4 == 3)
+        flash_color = flash_colors[idx // 4 % len(flash_colors)]
         if flash:
-            # Işık parlaması: ortada parlama, sonra normale dön
             vf = (f"{eff},"
                   f"vignette=PI/4,"
-                  f"curves=all='0/0 0.3/0.3 0.5/1.0 0.7/0.7 1/1'[base];"
-                  f"[base]fade=t=in:st=0:d=0.3:color=white,"
-                  f"fade=t=out:st={img_dur-0.3:.2f}:d=0.3,"
+                  f"fade=t=in:st=0:d=0.4:color={flash_color},"
+                  f"fade=t=out:st={img_dur-0.4:.2f}:d=0.4:color={flash_color},"
                   f"format=yuv420p")
         else:
             vf = (f"{eff},"
@@ -473,7 +473,7 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
             capture_output=True, text=True, timeout=300)
         if r.returncode==0 and clip.exists():
             clips.append(str(clip))
-            tg(f"Clip {idx+1}/{len(images)} {'⚡' if flash else '✓'}","🎞")
+            tg(f"Clip {idx+1}/{len(images)} {'⚡' if flash else '✓'} {'🔵' if flash_color=='0x4444ff' else '🔴' if flash_color=='0xff2222' else '⚪'}","🎞")
         else:
             tg(f"Clip {idx+1} failed: {r.stderr[-60:]}","⚠")
 

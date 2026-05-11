@@ -445,24 +445,20 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
     for idx, img in enumerate(images):
         clip = WORK/f"clip_{idx:02d}.mp4"
         frames = int(img_dur * fps)
-        eff = make_effect(idx, frames)
+        vf = make_effect(idx, frames, img_dur)
 
         # Her 4 sahnede bir renkli ışık parlaması
-        flash_colors = ["white", "0x4444ff", "0xff2222"]  # beyaz, mavi, kırmızı
+        flash_colors = ["white", "0x4444ff", "0xff2222"]
         flash = (idx % 4 == 3)
         flash_color = flash_colors[idx // 4 % len(flash_colors)]
         if flash:
-            vf = (f"{eff},"
-                  f"vignette=PI/4,"
-                  f"fade=t=in:st=0:d=0.4:color={flash_color},"
-                  f"fade=t=out:st={img_dur-0.4:.2f}:d=0.4:color={flash_color},"
-                  f"format=yuv420p")
-        else:
-            vf = (f"{eff},"
-                  f"vignette=PI/4,"
-                  f"fade=t=in:st=0:d={fade_dur},"
-                  f"fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur},"
-                  f"format=yuv420p")
+            vf = vf.replace(
+                f"fade=t=in:st=0:d={fade_dur},",
+                f"fade=t=in:st=0:d=0.4:color={flash_color},"
+            ).replace(
+                f"fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur}",
+                f"fade=t=out:st={img_dur-0.4:.2f}:d=0.4:color={flash_color}"
+            )
 
         r=subprocess.run(["ffmpeg","-y","-loop","1","-i",img,
             "-vf", vf,

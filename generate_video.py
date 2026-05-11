@@ -445,7 +445,7 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
     for idx, img in enumerate(images):
         clip = WORK/f"clip_{idx:02d}.mp4"
         frames = int(img_dur * fps)
-        vf = make_effect(idx, frames, img_dur)
+        vf = make_effect(idx, frames, img_dur)  # type: ignore
 
         # Her 4 sahnede bir renkli ışık parlaması
         flash_colors = ["white", "0x4444ff", "0xff2222"]

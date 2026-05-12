@@ -59,20 +59,25 @@ def gemini(prompt, max_tokens=8192):
         headers = {"Content-Type":"application/json","x-goog-api-key":GEMINI_API_KEY}
         body = {"contents":[{"parts":[{"text":prompt}]}],
                 "generationConfig":{"temperature":0.7,"maxOutputTokens":max_tokens}}
-        for _ in range(2):
+        for attempt in range(3):
             try:
-                r = requests.post(url,headers=headers,json=body,timeout=90)
+                r = requests.post(url,headers=headers,json=body,timeout=120)
                 if r.status_code == 200:
                     c = r.json().get("candidates",[])
                     if c:
                         t = c[0].get("content",{}).get("parts",[{}])[0].get("text","").strip()
                         if t: return t,model
-                    time.sleep(5)
-                elif r.status_code == 429: time.sleep(15)
-                elif r.status_code == 503: break
+                    time.sleep(8)
+                elif r.status_code == 429:
+                    wait = 30 + attempt * 20
+                    tg(f"{model} rate limit, {wait}s bekleniyor...","⏳")
+                    time.sleep(wait)
+                elif r.status_code == 503:
+                    time.sleep(15); break
                 else:
                     tg(f"{model}: {r.json().get('error',{}).get('message','')[:50]}","⚠"); break
-            except requests.Timeout: time.sleep(10)
+            except requests.Timeout:
+                time.sleep(15)
     raise Exception("No Gemini model responded")
 
 def parse_json(raw):

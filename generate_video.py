@@ -329,7 +329,7 @@ def generate_audio(script):
     sf=WORK/"script.txt"; rf=WORK/"audio_raw.mp3"
     sub_vtt=WORK/"subtitles.vtt"; sub_srt=WORK/"subtitles.srt"
     sf.write_text(script,encoding="utf-8")
-    r=subprocess.run(["edge-tts","--voice","en-US-GuyNeural",
+    r=subprocess.run(["edge-tts","--voice","en-GB-RyanNeural",
         "--file",str(sf),"--write-media",str(rf),
         "--write-subtitles",str(sub_vtt)],
         capture_output=True,text=True,timeout=600)
@@ -385,13 +385,13 @@ def mix_audio(narration, music, duration):
 
 # ─── VIDEO ASSEMBLY ───────────────────────────────────────────────────────────
 def assemble_video(images, audio, subtitle_srt, total_duration):
-    tg(f"Assembling video...\n{len(images)} images | xfade transitions\n⏳ ~{len(images)//2+5} min","🎬")
+    tg(f"Assembling video...\n{len(images)} images | fade transitions\n⏳ ~{len(images)//2+5} min","🎬")
 
     img_dur  = total_duration / len(images)
     fps      = 30
-    fade_dur = 0.6
+    fade_dur = 0.5
     fcolors  = ["white","0x4444ff","0xff2222"]
-    xfade_types = ["fade","dissolve","fadeblack","fadegrays","smoothleft"]
+    gecis    = ["fade","fadeblack","dissolve","fadegrays","fade"]
 
     clips = []
     for idx, img in enumerate(images):
@@ -407,12 +407,21 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
             f"h='ih/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half}))':"
             f"x='(iw-iw/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half})))/2':"
             f"y='(ih-ih/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half})))/2',"
-            f"scale=1920:1080,vignette=PI/4,format=yuv420p"
+            f"scale=1920:1080,vignette=PI/4"
         )
+
+        if flash:
+            vf = f"{zoom},fade=t=in:st=0:d=0.4:color={fcol},fade=t=out:st={img_dur-0.4:.2f}:d=0.4:color={fcol},format=yuv420p"
+        else:
+            tip = gecis[idx % len(gecis)]
+            color = "black" if tip in ["fadeblack","fadegrays"] else None
+            fi = f"fade=t=in:st=0:d={fade_dur}" + (f":color={color}" if color else "")
+            fo = f"fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur}" + (f":color={color}" if color else "")
+            vf = f"{zoom},{fi},{fo},format=yuv420p"
 
         r = subprocess.run(
             ["ffmpeg","-y","-loop","1","-i",img,
-             "-vf",zoom,"-t",str(img_dur),
+             "-vf",vf,"-t",str(img_dur),
              "-c:v","libx264","-preset","fast","-crf","20",
              "-r",str(fps),str(clip)],
             capture_output=True,text=True,timeout=300)
@@ -425,56 +434,14 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
 
     if not clips: raise Exception("No clips generated")
 
-    tg("Merging clips with xfade...","🎬")
-
-    if len(clips) == 1:
-        raw_video = WORK/"video_raw.mp4"
-        subprocess.run(["cp", clips[0], str(raw_video)])
-    else:
-        prev     = clips[0]
-        prev_dur = img_dur
-
-        for i in range(1, len(clips)):
-            out    = WORK/f"xfade_{i:02d}.mp4"
-            xt     = xfade_types[i % len(xfade_types)]
-            offset = max(prev_dur - fade_dur, 0.1)
-            flash  = (i % 4 == 3)
-            fcol   = fcolors[(i // 4) % len(fcolors)]
-
-            if flash:
-                fv = (f"[0:v][1:v]xfade=transition=fade:duration={fade_dur}:offset={offset:.3f}[xv];"
-                      f"[xv]fade=t=in:st={offset:.3f}:d=0.3:color={fcol},"
-                      f"fade=t=out:st={offset+fade_dur:.3f}:d=0.3:color={fcol}[outv]")
-            else:
-                fv = f"[0:v][1:v]xfade=transition={xt}:duration={fade_dur}:offset={offset:.3f}[outv]"
-
-            r = subprocess.run(
-                ["ffmpeg","-y","-i",str(prev),"-i",clips[i],
-                 "-filter_complex",fv,
-                 "-map","[outv]",
-                 "-c:v","libx264","-preset","fast","-crf","20",
-                 "-r",str(fps),str(out)],
-                capture_output=True,text=True,timeout=600)
-
-            if r.returncode==0 and out.exists():
-                prev     = str(out)
-                prev_dur = prev_dur + img_dur - fade_dur
-                tg(f"Transition {i}/{len(clips)-1} ✓","🔗")
-            else:
-                tg(f"xfade {i} failed, using concat...","⚠")
-                concat_list = WORK/"concat.txt"
-                concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in clips))
-                raw_video = WORK/"video_raw.mp4"
-                subprocess.run(["ffmpeg","-y","-f","concat","-safe","0",
-                    "-i",str(concat_list.resolve()),"-c:v","copy",str(raw_video)],
-                    capture_output=True,text=True,timeout=3600)
-                break
-        else:
-            raw_video = WORK/"video_raw.mp4"
-            subprocess.run(["cp", str(prev), str(raw_video)])
-
-    if not raw_video.exists():
-        raise Exception("Raw video not created")
+    concat_list = WORK/"concat.txt"
+    concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in clips))
+    raw_video = WORK/"video_raw.mp4"
+    r = subprocess.run(["ffmpeg","-y","-f","concat","-safe","0",
+        "-i",str(concat_list.resolve()),"-c:v","copy",str(raw_video)],
+        capture_output=True,text=True,timeout=3600)
+    if r.returncode!=0 or not raw_video.exists():
+        raise Exception(f"Concat failed: {r.stderr[-100:]}")
 
     final_video = WORK/"final_video.mp4"
     if subtitle_srt and os.path.exists(subtitle_srt):

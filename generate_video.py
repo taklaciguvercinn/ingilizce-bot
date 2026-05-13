@@ -70,7 +70,7 @@ def gemini(prompt, max_tokens=8192):
                     time.sleep(8)
                 elif r.status_code == 429:
                     wait = 30 + attempt * 20
-                    tg(f"{model} rate limit, {wait}s bekleniyor...","⏳")
+                    tg(f"{model} rate limit, waiting {wait}s...","⏳")
                     time.sleep(wait)
                 elif r.status_code == 503:
                     time.sleep(15); break
@@ -100,13 +100,12 @@ def parse_json(raw):
     if "title" in data: return data
     raise Exception(f"JSON parse failed: {raw[:60]}")
 
-# ─── CONTENT GENERATION ──────────────────────────────────────────────────────
+# ─── CONTENT ─────────────────────────────────────────────────────────────────
 def generate_content(topic, duration, img_count):
     tg(f"Generating content for '{topic}'...","📚")
-    word_target = duration * 170  # daha uzun script
+    word_target = duration * 170
 
-    # Gemini'den konuya özel görsel promptları üret
-    tg(f"Generating {img_count} image prompts for '{topic}'...","🎨")
+    tg(f"Generating {img_count} image prompts...","🎨")
     img_prompts = []
     try:
         p_img = f"""You are a visual artist. Generate exactly {img_count} unique image prompts for a documentary about: {topic}
@@ -127,13 +126,11 @@ Generate {img_count} prompts now:"""
             if len(line) > 10:
                 line += ", no people, no humans, cinematic dramatic lighting 8k"
                 img_prompts.append(line)
-            if len(img_prompts) >= img_count:
-                break
-        tg(f"Got {len(img_prompts)} AI image prompts","✅")
+            if len(img_prompts) >= img_count: break
+        tg(f"Got {len(img_prompts)} image prompts","✅")
     except Exception as e:
         tg(f"Image prompt error: {e}","⚠")
 
-    # Yeterli prompt yoksa fallback
     while len(img_prompts) < img_count:
         i = len(img_prompts)
         img_prompts.append(f"{topic} cinematic dramatic scene {i+1}, no people, 8k atmospheric lighting")
@@ -148,7 +145,6 @@ Generate {img_count} prompts now:"""
         "color": "#1a1a2e"
     }
 
-    # SEO
     tg("Optimizing SEO...","📋")
     try:
         p1 = f"""YouTube documentary about: {topic}. Duration: {duration} minutes.
@@ -162,7 +158,6 @@ Return only this JSON (no apostrophes in values):
     except:
         tg("SEO using defaults","⚠")
 
-    # Script - uzun ve kesin
     tg(f"Writing script ({word_target} words)...","📝")
     p2 = f"""You are a professional documentary narrator for National Geographic. Write a detailed documentary script about: {topic}
 
@@ -390,16 +385,21 @@ def mix_audio(narration, music, duration):
 
 # ─── VIDEO ASSEMBLY ───────────────────────────────────────────────────────────
 def assemble_video(images, audio, subtitle_srt, total_duration):
-    tg(f"Assembling video...\n{len(images)} images | fade + flash effects\n⏳ ~{len(images)//2+5} min","🎬")
+    tg(f"Assembling video...\n{len(images)} images | xfade transitions\n⏳ ~{len(images)//2+5} min","🎬")
 
     img_dur  = total_duration / len(images)
     fps      = 30
     fade_dur = 0.6
-    gecis    = ["fade","dissolve","brightness","fade","dissolve"]
     fcolors  = ["white","0x4444ff","0xff2222"]
+    xfade_types = ["fade","dissolve","fadeblack","fadegrays","smoothleft"]
 
-    def make_vf(idx, dur, is_flash, fcol):
-        half = max(int(dur * fps) // 2, 1)
+    clips = []
+    for idx, img in enumerate(images):
+        clip  = WORK/f"clip_{idx:02d}.mp4"
+        flash = (idx % 4 == 3)
+        fcol  = fcolors[(idx // 4) % len(fcolors)]
+
+        half = max(int(img_dur * fps) // 2, 1)
         zoom = (
             f"scale=8000:-1,"
             f"crop="
@@ -407,30 +407,12 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
             f"h='ih/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half}))':"
             f"x='(iw-iw/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half})))/2':"
             f"y='(ih-ih/(1.0+0.15*if(lte(n,{half}),n/{half},(2*{half}-n)/{half})))/2',"
-            f"scale=1920:1080,vignette=PI/4"
+            f"scale=1920:1080,vignette=PI/4,format=yuv420p"
         )
-        if is_flash:
-            return (f"{zoom},"
-                    f"fade=t=in:st=0:d=0.4:color={fcol},"
-                    f"fade=t=out:st={dur-0.4:.2f}:d=0.4:color={fcol},"
-                    f"format=yuv420p")
-        tip = gecis[idx % len(gecis)]
-        fi = f"fade=t=in:st=0:d={fade_dur}"
-        fo = f"fade=t=out:st={dur-fade_dur:.2f}:d={fade_dur}"
-        if tip == "dissolve": fi+=":alpha=1"; fo+=":alpha=1"
-        elif tip == "brightness": fi+=":color=black"; fo+=":color=black"
-        return f"{zoom},{fi},{fo},format=yuv420p"
-
-    clips = []
-    for idx, img in enumerate(images):
-        clip    = WORK/f"clip_{idx:02d}.mp4"
-        flash   = (idx % 4 == 3)
-        fcol    = fcolors[(idx // 4) % len(fcolors)]
-        vf      = make_vf(idx, img_dur, flash, fcol)
 
         r = subprocess.run(
             ["ffmpeg","-y","-loop","1","-i",img,
-             "-vf",vf,"-t",str(img_dur),
+             "-vf",zoom,"-t",str(img_dur),
              "-c:v","libx264","-preset","fast","-crf","20",
              "-r",str(fps),str(clip)],
             capture_output=True,text=True,timeout=300)
@@ -443,14 +425,56 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
 
     if not clips: raise Exception("No clips generated")
 
-    concat_list = WORK/"concat.txt"
-    concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in clips))
-    raw_video = WORK/"video_raw.mp4"
-    r = subprocess.run(["ffmpeg","-y","-f","concat","-safe","0",
-        "-i",str(concat_list.resolve()),"-c:v","copy",str(raw_video)],
-        capture_output=True,text=True,timeout=3600)
-    if r.returncode!=0 or not raw_video.exists():
-        raise Exception(f"Concat failed: {r.stderr[-100:]}")
+    tg("Merging clips with xfade...","🎬")
+
+    if len(clips) == 1:
+        raw_video = WORK/"video_raw.mp4"
+        subprocess.run(["cp", clips[0], str(raw_video)])
+    else:
+        prev     = clips[0]
+        prev_dur = img_dur
+
+        for i in range(1, len(clips)):
+            out    = WORK/f"xfade_{i:02d}.mp4"
+            xt     = xfade_types[i % len(xfade_types)]
+            offset = max(prev_dur - fade_dur, 0.1)
+            flash  = (i % 4 == 3)
+            fcol   = fcolors[(i // 4) % len(fcolors)]
+
+            if flash:
+                fv = (f"[0:v][1:v]xfade=transition=fade:duration={fade_dur}:offset={offset:.3f}[xv];"
+                      f"[xv]fade=t=in:st={offset:.3f}:d=0.3:color={fcol},"
+                      f"fade=t=out:st={offset+fade_dur:.3f}:d=0.3:color={fcol}[outv]")
+            else:
+                fv = f"[0:v][1:v]xfade=transition={xt}:duration={fade_dur}:offset={offset:.3f}[outv]"
+
+            r = subprocess.run(
+                ["ffmpeg","-y","-i",str(prev),"-i",clips[i],
+                 "-filter_complex",fv,
+                 "-map","[outv]",
+                 "-c:v","libx264","-preset","fast","-crf","20",
+                 "-r",str(fps),str(out)],
+                capture_output=True,text=True,timeout=600)
+
+            if r.returncode==0 and out.exists():
+                prev     = str(out)
+                prev_dur = prev_dur + img_dur - fade_dur
+                tg(f"Transition {i}/{len(clips)-1} ✓","🔗")
+            else:
+                tg(f"xfade {i} failed, using concat...","⚠")
+                concat_list = WORK/"concat.txt"
+                concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in clips))
+                raw_video = WORK/"video_raw.mp4"
+                subprocess.run(["ffmpeg","-y","-f","concat","-safe","0",
+                    "-i",str(concat_list.resolve()),"-c:v","copy",str(raw_video)],
+                    capture_output=True,text=True,timeout=3600)
+                break
+        else:
+            raw_video = WORK/"video_raw.mp4"
+            subprocess.run(["cp", str(prev), str(raw_video)])
+
+    if not raw_video.exists():
+        raise Exception("Raw video not created")
 
     final_video = WORK/"final_video.mp4"
     if subtitle_srt and os.path.exists(subtitle_srt):

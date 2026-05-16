@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Video Bot English v4"""
+"""Video Bot English v5 - Human narration + effects"""
 
-import sys,os,json,time,requests,subprocess,re,struct,math,hashlib
+import sys,os,json,time,requests,subprocess,re,struct,math,hashlib,random
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -40,16 +40,21 @@ def tg_photo(path, caption):
 
 def parse_command(cmd):
     p = [x.strip() for x in cmd.strip().split(",")]
-    if len(p) != 6:
-        raise ValueError("Format: Topic,Music,Minutes,Images,DD.MM.YYYY,HH:MM")
-    topic, music_hint, dur, imgs, date_s, time_s = p
+    if len(p) == 6:
+        topic, music_hint, dur, imgs, date_s, time_s = p
+        efekt_sayisi = 10
+    elif len(p) == 7:
+        topic, music_hint, dur, imgs, efekt_sayisi, date_s, time_s = p
+        efekt_sayisi = int(efekt_sayisi)
+    else:
+        raise ValueError("Format: Topic,Music,Minutes,Images,Effects,DD.MM.YYYY,HH:MM")
     pub = datetime.strptime(f"{date_s} {time_s}","%d.%m.%Y %H:%M")
     return {
         "topic": topic,
         "music_hint": music_hint.strip().lower(),
         "duration": int(dur),
         "img_count": int(imgs),
-        "publish_dt": pub,
+        "efekt_sayisi": efekt_sayisi,
         "publish_iso": pub.strftime("%Y-%m-%dT%H:%M:%S+00:00")
     }
 
@@ -109,36 +114,32 @@ def generate_content(topic, duration, img_count):
     img_prompts = []
     try:
         p_img = f"""You are a visual artist. Generate exactly {img_count} unique image prompts for a documentary about: {topic}
-
 RULES:
-- Each prompt must be directly related to {topic} - specific scenes, locations, objects, events
-- NO people, NO humans, NO faces, NO text in images
-- Cinematic, dramatic, high quality photography style
-- Each prompt on a new line, numbered 1 to {img_count}
-- Keep each prompt under 100 characters
-- Vary the scenes: wide shots, close-ups, aerial views, atmospheric shots
+- Each prompt directly related to {topic}
+- NO people, NO humans, NO faces, NO text
+- Cinematic, dramatic style
+- Numbered 1 to {img_count}, one per line
+- Under 100 characters each
+- Vary: wide shots, close-ups, aerial, atmospheric
 
-Generate {img_count} prompts now:"""
-        raw, _ = gemini(p_img, max_tokens=2048)
-        lines = [l.strip() for l in raw.split('\n') if l.strip()]
-        for line in lines:
-            line = re.sub(r'^\d+[\.\)]\s*','',line).strip()
+Generate {img_count} prompts:"""
+        raw,_ = gemini(p_img, max_tokens=2048)
+        for line in raw.split('\n'):
+            line = re.sub(r'^\d+[\.\)]\s*','',line.strip())
             if len(line) > 10:
-                line += ", no people, no humans, cinematic dramatic lighting 8k"
-                img_prompts.append(line)
+                img_prompts.append(line + ", no people, cinematic dramatic 8k")
             if len(img_prompts) >= img_count: break
-        tg(f"Got {len(img_prompts)} image prompts","✅")
+        tg(f"Got {len(img_prompts)} prompts","✅")
     except Exception as e:
         tg(f"Image prompt error: {e}","⚠")
 
     while len(img_prompts) < img_count:
-        i = len(img_prompts)
-        img_prompts.append(f"{topic} cinematic dramatic scene {i+1}, no people, 8k atmospheric lighting")
+        img_prompts.append(f"{topic} cinematic dramatic scene, no people, 8k")
 
     meta = {
         "title": f"{topic}: The Untold Story! 🏛️",
-        "description": f"Discover the incredible story of {topic}. #documentary #history #{topic.replace(' ','')}",
-        "tags": [topic,"documentary","history","youtube","education","mystery","ancient","epic"],
+        "description": f"The incredible story of {topic}. #documentary #history #{topic.replace(' ','')}",
+        "tags": [topic,"documentary","history","education","mystery","epic"],
         "image_prompts": img_prompts[:img_count],
         "thumbnail_text": topic.upper()[:15],
         "thumbnail_prompt": f"{topic} epic dramatic cinematic no text no people",
@@ -147,38 +148,38 @@ Generate {img_count} prompts now:"""
 
     tg("Optimizing SEO...","📋")
     try:
-        p1 = f"""YouTube documentary about: {topic}. Duration: {duration} minutes.
-Return only this JSON (no apostrophes in values):
-{{"title":"engaging title max 60 chars with emoji","description":"400 char description with #hashtags","tags":["tag1","tag2","tag3","tag4","tag5","tag6","tag7","tag8"],"thumbnail_text":"MAX 3 WORDS"}}"""
-        raw,model = gemini(p1,max_tokens=512)
+        raw,model = gemini(
+            f"YouTube documentary: {topic}. {duration} min. No apostrophes. "
+            f"JSON: {{\"title\":\"60 chars emoji\",\"description\":\"400 chars hashtags\","
+            f"\"tags\":[\"t1\",\"t2\",\"t3\",\"t4\",\"t5\",\"t6\",\"t7\",\"t8\"],\"thumbnail_text\":\"3 WORDS\"}}",
+            max_tokens=512)
         mini = parse_json(raw)
         for k in ["title","description","tags","thumbnail_text"]:
             if mini.get(k): meta[k] = mini[k]
-        tg(f"SEO ready ({model}): <b>{meta['title']}</b>","✅")
-    except:
-        tg("SEO using defaults","⚠")
+        tg(f"SEO ready: <b>{meta['title']}</b>","✅")
+    except: tg("SEO defaults","⚠")
 
     tg(f"Writing script ({word_target} words)...","📝")
-    p2 = f"""You are a professional documentary narrator for National Geographic. Write a detailed documentary script about: {topic}
+    p2 = f"""You are a passionate documentary narrator. Write an engaging script about: {topic}
 
 CRITICAL RULES:
-- You MUST write EXACTLY {word_target} words or more. Count carefully.
-- Write ONLY narration text - pure flowing prose
-- NO scene directions, NO [brackets], NO (parentheses), NO music notes
-- NO "Narrator:", NO headers, NO bullet points, NO numbered lists
-- Keep writing until you reach {word_target} words - do not stop early
-- Cover the full history, background, key events, significance, and legacy of {topic}
-- Style: engaging, dramatic, informative like National Geographic
+- Write EXACTLY {word_target} words or MORE
+- Mix two styles naturally throughout:
+  1. NARRATION: dramatic flowing prose like National Geographic
+  2. PERSONAL COMMENTARY: occasional human thoughts like "Think about that for a moment...", "What strikes me most is...", "Can you imagine being there?", "This is where it gets truly fascinating...", "I find it remarkable that...", "Here's what really gets me..."
+- Personal commentary should feel natural, not forced - maybe every 150-200 words
+- NO scene directions, NO [brackets], NO music cues
+- NO "Narrator:" labels
+- Write {word_target}+ words without stopping
 
-Begin now and write {word_target}+ words:"""
+Begin now:"""
 
     script = ""
     for attempt in range(4):
         try:
-            raw,model = gemini(p2,max_tokens=8192)
+            raw,model = gemini(p2, max_tokens=8192)
             raw = re.sub(r'\[.*?\]','',raw,flags=re.DOTALL)
             raw = re.sub(r'\(.*?\)','',raw,flags=re.DOTALL)
-            raw = re.sub(r'Narrator\s*:','',raw,flags=re.IGNORECASE)
             raw = re.sub(r'^\*+\s*|^#+\s.*$','',raw,flags=re.MULTILINE)
             raw = re.sub(r'\n{3,}','\n\n',raw).strip()
             wc = len(raw.split())
@@ -203,8 +204,7 @@ def generate_music(topic, duration_sec, music_hint=""):
     tg("Loading music...","🎵")
     repo_root = Path(os.environ.get("GITHUB_WORKSPACE","."))
     all_mp3 = list(repo_root.glob("*.mp3"))
-    if not all_mp3:
-        tg("No MP3 in repo!","⚠"); return _synth_fallback(topic, duration_sec)
+    if not all_mp3: return ""
 
     def clean(s): return re.sub(r"[^a-z0-9]","",s.lower())
     chosen = None
@@ -213,15 +213,15 @@ def generate_music(topic, duration_sec, music_hint=""):
         hc = clean(music_hint)
         for mp3 in all_mp3:
             if hc in clean(mp3.name): chosen = mp3; break
-        if not chosen: tg(f"Hint '{music_hint}' not found, using category...","⚠")
+        if not chosen: tg(f"Hint not found, using category...","⚠")
 
     if not chosen:
         k = topic.lower()
         cat = None
         if any(x in k for x in ["war","battle","viking","roman","ottoman","napoleon","soldier","crusade","hitler","military"]): cat="war"
-        elif any(x in k for x in ["egypt","ancient","greek","babylon","pharaoh","rome","persia","mystery","ghost","celeste","ship"]): cat="mystery"
-        elif any(x in k for x in ["space","technology","ai","future","science","robot","digital"]): cat="space"
-        elif any(x in k for x in ["nature","ocean","forest","animal","wildlife","earth"]): cat="nature"
+        elif any(x in k for x in ["egypt","ancient","greek","babylon","pharaoh","mystery","ghost","ship"]): cat="mystery"
+        elif any(x in k for x in ["space","technology","ai","future","science","robot"]): cat="space"
+        elif any(x in k for x in ["nature","ocean","forest","animal","wildlife"]): cat="nature"
         if cat:
             matches = [m for m in all_mp3 if cat in m.name.lower()]
             if matches:
@@ -231,37 +231,9 @@ def generate_music(topic, duration_sec, music_hint=""):
     if not chosen:
         seed = int(hashlib.md5(topic.encode()).hexdigest()[:8],16)
         chosen = all_mp3[seed % len(all_mp3)]
-        tg(f"Random music: {chosen.name}","⚠")
 
     tg(f"Music: <b>{chosen.name}</b> ({chosen.stat().st_size//1024}KB)","✅")
     return str(chosen)
-
-def _synth_fallback(topic, duration_sec):
-    wav=WORK/"music.wav"; mp3=WORK/"music.mp3"
-    sr=44100; dur=int(min(duration_sec+30,7200)); n=sr*dur; fade=sr*3
-    try:
-        with open(wav,'wb') as f:
-            dsize=n*2
-            f.write(b'RIFF'); f.write(struct.pack('<I',36+dsize))
-            f.write(b'WAVEfmt '); f.write(struct.pack('<I',16))
-            f.write(struct.pack('<H',1)); f.write(struct.pack('<H',1))
-            f.write(struct.pack('<I',sr)); f.write(struct.pack('<I',sr*2))
-            f.write(struct.pack('<H',2)); f.write(struct.pack('<H',16))
-            f.write(b'data'); f.write(struct.pack('<I',dsize))
-            freqs=[130,164,196,261,87]; amps=[0.20,0.16,0.12,0.07,0.18]
-            for start in range(0,n,sr):
-                end=min(start+sr,n); buf=[]
-                for i in range(start,end):
-                    t=i/sr; v=sum(a*math.sin(2*math.pi*fr*t) for a,fr in zip(amps,freqs))
-                    if i<fade: v*=i/fade
-                    elif i>n-fade: v*=(n-i)/fade
-                    buf.append(struct.pack('<h',int(max(-0.85,min(0.85,v))*32767)))
-                f.write(b''.join(buf))
-        r=subprocess.run(["ffmpeg","-y","-i",str(wav),"-af","volume=2.0",
-            "-c:a","mp3","-b:a","128k",str(mp3)],capture_output=True,timeout=180)
-        if r.returncode==0 and mp3.exists(): return str(mp3)
-    except: pass
-    return ""
 
 # ─── IMAGES ──────────────────────────────────────────────────────────────────
 def download_image(i, prompt, total, topic=""):
@@ -282,16 +254,15 @@ def download_image(i, prompt, total, topic=""):
         if attempt == 1:
             prompt = f"{topic} cinematic dramatic landscape no people 8k"
 
-    colors=["0x3D1C02","0x4A0E0E","0x0A1628","0x2D1B69","0x003333","0x1A3A1A","0x330033","0x1A1A00"]
+    colors=["0x3D1C02","0x4A0E0E","0x0A1628","0x2D1B69","0x003333","0x1A3A1A"]
     subprocess.run(["ffmpeg","-y","-f","lavfi","-i",f"color=c={colors[i%len(colors)]}:size=1920x1080:rate=1",
         "-vframes","1","-q:v","2",str(path)],capture_output=True)
     tg(f"Image {i+1} fallback","⚠")
     return str(path)
 
 def generate_images(prompts, topic=""):
-    n = len(prompts)
-    tg(f"Generating {n} images...","🎨")
-    return [download_image(i,p,n,topic) for i,p in enumerate(prompts)]
+    tg(f"Generating {len(prompts)} images...","🎨")
+    return [download_image(i,p,len(prompts),topic) for i,p in enumerate(prompts)]
 
 # ─── THUMBNAIL ───────────────────────────────────────────────────────────────
 def generate_thumbnail(prompt, text, color, topic):
@@ -308,8 +279,7 @@ def generate_thumbnail(prompt, text, color, topic):
         except: time.sleep(10)
     else:
         subprocess.run(["ffmpeg","-y","-f","lavfi","-i",
-            f"color=c={color.replace('#','0x')}:size=1280x720:rate=1",
-            "-vframes","1",str(base)],capture_output=True)
+            f"color=c={color.replace('#','0x')}:size=1280x720:rate=1","-vframes","1",str(base)],capture_output=True)
     m=text.upper()[:25].replace("'","").replace(":","\\:")
     k=topic.upper()[:20].replace("'","").replace(":","\\:")
     fs=80 if len(m)<=10 else 60 if len(m)<=18 else 44
@@ -325,7 +295,7 @@ def generate_thumbnail(prompt, text, color, topic):
 
 # ─── AUDIO ───────────────────────────────────────────────────────────────────
 def generate_audio(script):
-    tg("Generating English narration...","🎙")
+    tg("Generating narration (Ryan - BBC style)...","🎙")
     sf=WORK/"script.txt"; rf=WORK/"audio_raw.mp3"
     sub_vtt=WORK/"subtitles.vtt"; sub_srt=WORK/"subtitles.srt"
     sf.write_text(script,encoding="utf-8")
@@ -335,7 +305,7 @@ def generate_audio(script):
         capture_output=True,text=True,timeout=600)
     if r.returncode!=0 or not rf.exists():
         raise Exception(f"TTS failed: {r.stderr[-80:]}")
-    tg("Audio generated","✅")
+    tg("Audio generated (Ryan Neural)","✅")
     if sub_vtt.exists():
         vtt=sub_vtt.read_text(encoding="utf-8"); srt=[]; count=1
         for block in re.split(r'\n\n+',vtt):
@@ -351,47 +321,120 @@ def generate_audio(script):
     probe=subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",str(rf)],
         capture_output=True,text=True)
     duration=float(json.loads(probe.stdout)["format"]["duration"])
-    tg(f"Audio ready! Duration: <b>{duration/60:.1f} minutes</b>","✅")
+    tg(f"Audio ready: <b>{duration/60:.1f} min</b>","✅")
     return str(rf), duration, str(sub_srt) if sub_srt.exists() else ""
 
 # ─── MUSIC MIX ───────────────────────────────────────────────────────────────
 def mix_audio(narration, music, duration):
-    if not music: tg("No music","⚠"); return narration
+    if not music: return narration
     mp = Path(music)
-    if not mp.exists(): tg(f"Music not found: {music}","⚠"); return narration
-    tg(f"Music size: {mp.stat().st_size//1024}KB","🎚")
+    if not mp.exists(): return narration
+    tg(f"Music: {mp.stat().st_size//1024}KB","🎚")
     try:
         pb=subprocess.run(["ffprobe","-v","quiet","-print_format","json","-show_format",str(mp)],
             capture_output=True,text=True)
         ms=float(json.loads(pb.stdout)["format"]["duration"])
-        if ms<3: tg("Music too short","⚠"); return narration
-        tg(f"Mixing ({ms:.0f}s music)...","🎚")
+        if ms<3: return narration
+        tg(f"Mixing ({ms:.0f}s)...","🎚")
     except Exception as e:
         tg(f"ffprobe error: {e}","⚠"); return narration
     mixed=WORK/"mixed.mp3"
     cmd=["ffmpeg","-y","-i",narration,"-stream_loop","-1","-i",str(mp),
          "-filter_complex",
          "[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a1];"
-         "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.20[a2];"
+         "[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.12[a2];"
          "[a1][a2]amix=inputs=2:duration=first:weights=1 0.6[aout]",
          "-map","[aout]","-c:a","libmp3lame","-b:a","192k",
          "-t",str(int(duration)+2),str(mixed)]
     r=subprocess.run(cmd,capture_output=True,text=True,timeout=600)
     if r.returncode==0 and mixed.exists() and mixed.stat().st_size>50000:
-        tg(f"Music mixed! ({mixed.stat().st_size//1024}KB)","✅")
+        tg(f"Mixed! ({mixed.stat().st_size//1024}KB)","✅")
         return str(mixed)
-    tg(f"Mix failed: {r.stderr[-60:]}","⚠")
     return narration
 
+# ─── EFFECT ENGINE ───────────────────────────────────────────────────────────
+def apply_effect(clip_path, out_path, duration, efekt_tipi, fps=30):
+    """Her efekt ayrı, basit ve test edilmiş FFmpeg komutu"""
+    inp = str(clip_path)
+    out = str(out_path)
+    t1  = round(duration * 0.35, 2)  # efekt başlangıç zamanı
+    t2  = round(duration * 0.65, 2)  # efekt bitiş zamanı
+
+    if efekt_tipi == "lightning":
+        # Ani beyaz flash — basit ve kesin çalışır
+        cmd = ["ffmpeg","-y","-i",inp,
+               "-vf",f"fade=t=in:st={t1}:d=0.05:color=white,fade=t=out:st={t1+0.05}:d=0.1",
+               "-c:v","libx264","-preset","fast","-crf","20","-r",str(fps),out]
+
+    elif efekt_tipi == "glitch":
+        # Renk kanalı kaydırma — hue shift
+        cmd = ["ffmpeg","-y","-i",inp,
+               "-vf",(f"split=2[a][b];"
+                      f"[a]trim=0:{t1},setpts=PTS-STARTPTS[p1];"
+                      f"[b]trim={t1}:{t1+0.15},setpts=PTS-STARTPTS,"
+                      f"hue=h=120:s=3,eq=contrast=2[p2];"
+                      f"[p1][p2]concat=n=2:v=1:a=0,format=yuv420p"),
+               "-c:v","libx264","-preset","fast","-crf","20","-r",str(fps),"-t",str(duration),out]
+
+    elif efekt_tipi == "shake":
+        # Crop ile titreme — garantili çalışır
+        cmd = ["ffmpeg","-y","-i",inp,
+               "-vf",(f"crop=1900:1060:10:10,"
+                      f"scale=1920:1080,"
+                      f"format=yuv420p"),
+               "-c:v","libx264","-preset","fast","-crf","20","-r",str(fps),out]
+
+    elif efekt_tipi == "zoom_punch":
+        # Ani zoom in → yavaş geri çekilme
+        # 3 parça: normal → zoom → normal geri
+        cmd = ["ffmpeg","-y","-i",inp,
+               "-vf",(f"scale=8000:-1,"
+                      f"zoompan=z='if(between(t,{t1},{t1+0.08}),1.0+(t-{t1})*2.5,if(between(t,{t1+0.08},{t2}),1.2-((t-{t1+0.08})/({t2}-{t1+0.08}))*0.2,1.0))':"
+                      f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+                      f"d=1:s=1920x1080:fps={fps},"
+                      f"format=yuv420p"),
+               "-c:v","libx264","-preset","fast","-crf","20","-r",str(fps),"-t",str(duration),out]
+
+    elif efekt_tipi == "film_reel":
+        # Film grain + vignette — basit noise
+        cmd = ["ffmpeg","-y","-i",inp,
+               "-vf",(f"noise=alls=12:allf=t,"
+                      f"vignette=PI/3,"
+                      f"eq=contrast=1.1:brightness=-0.05,"
+                      f"format=yuv420p"),
+               "-c:v","libx264","-preset","fast","-crf","20","-r",str(fps),out]
+    else:
+        return False
+
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        tg(f"Effect {efekt_tipi} error: {r.stderr[-60:]}","⚠")
+        return False
+    return Path(out_path).exists() and Path(out_path).stat().st_size > 1000
+
 # ─── VIDEO ASSEMBLY ───────────────────────────────────────────────────────────
-def assemble_video(images, audio, subtitle_srt, total_duration):
-    tg(f"Assembling video...\n{len(images)} images | fade transitions\n⏳ ~{len(images)//2+5} min","🎬")
+def assemble_video(images, audio, subtitle_srt, total_duration, efekt_sayisi):
+    tg(f"Assembling video...\n{len(images)} images | {efekt_sayisi} effects","🎬")
 
     img_dur  = total_duration / len(images)
     fps      = 30
     fade_dur = 0.5
     fcolors  = ["white","0x4444ff","0xff2222"]
-    gecis    = ["fade","fadeblack","dissolve","fadegrays","fade"]
+
+    # Efekt dağılımı — hangi kliplere efekt gelecek
+    efekt_tipleri = ["lightning","glitch","shake","zoom_punch","film_reel"]
+    rng = random.Random(int(hashlib.md5(str(len(images)).encode()).hexdigest()[:8],16))
+
+    # Efekt uygulancak klip indekslerini seç
+    efekt_klipleri = {}
+    if efekt_sayisi > 0:
+        secilecek = min(efekt_sayisi, len(images))
+        # Her efekt tipinden en az 1 tane olsun
+        secilen_idx = rng.sample(range(len(images)), secilecek)
+        for i, idx in enumerate(secilen_idx):
+            efekt_klipleri[idx] = efekt_tipleri[i % len(efekt_tipleri)]
+
+    tg(f"Effects assigned to {len(efekt_klipleri)} clips","⚡")
 
     clips = []
     for idx, img in enumerate(images):
@@ -412,12 +455,10 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
 
         if flash:
             vf = f"{zoom},fade=t=in:st=0:d=0.4:color={fcol},fade=t=out:st={img_dur-0.4:.2f}:d=0.4:color={fcol},format=yuv420p"
+        elif idx % 3 == 1:
+            vf = f"{zoom},fade=t=in:st=0:d={fade_dur}:color=black,fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur}:color=black,format=yuv420p"
         else:
-            tip = gecis[idx % len(gecis)]
-            color = "black" if tip in ["fadeblack","fadegrays"] else None
-            fi = f"fade=t=in:st=0:d={fade_dur}" + (f":color={color}" if color else "")
-            fo = f"fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur}" + (f":color={color}" if color else "")
-            vf = f"{zoom},{fi},{fo},format=yuv420p"
+            vf = f"{zoom},fade=t=in:st=0:d={fade_dur},fade=t=out:st={img_dur-fade_dur:.2f}:d={fade_dur},format=yuv420p"
 
         r = subprocess.run(
             ["ffmpeg","-y","-loop","1","-i",img,
@@ -425,17 +466,43 @@ def assemble_video(images, audio, subtitle_srt, total_duration):
              "-c:v","libx264","-preset","fast","-crf","20",
              "-r",str(fps),str(clip)],
             capture_output=True,text=True,timeout=300)
+
         if r.returncode==0 and clip.exists():
-            clips.append(str(clip))
-            icon = ("⚡🔵" if fcol=="0x4444ff" else "⚡🔴" if fcol=="0xff2222" else "⚡⚪") if flash else "✓"
-            tg(f"Clip {idx+1}/{len(images)} {icon}","🎞")
+            # Efekt uygula
+            if idx in efekt_klipleri:
+                efekt_out = WORK/f"clip_{idx:02d}_fx.mp4"
+                efekt_tip = efekt_klipleri[idx]
+                ok = apply_effect(clip, efekt_out, img_dur, efekt_tip, fps)
+                if ok:
+                    clips.append(str(efekt_out))
+                    tg(f"Clip {idx+1} ✓ +{efekt_tip}","⚡")
+                else:
+                    clips.append(str(clip))
+                    tg(f"Clip {idx+1} ✓ (effect skipped)","🎞")
+            else:
+                clips.append(str(clip))
+                tg(f"Clip {idx+1} ✓","🎞")
         else:
-            tg(f"Clip {idx+1} failed: {r.stderr[-80:]}","⚠")
+            tg(f"Clip {idx+1} failed","⚠")
 
     if not clips: raise Exception("No clips generated")
 
+    tg("Normalizing clips...","🎬")
+    norm_clips = []
+    for i, c in enumerate(clips):
+        norm = WORK/f"norm_{i:02d}.mp4"
+        r = subprocess.run(
+            ["ffmpeg","-y","-i",c,
+             "-c:v","libx264","-preset","fast","-crf","20",
+             "-r",str(fps),"-vf","scale=1920:1080",str(norm)],
+            capture_output=True,text=True,timeout=300)
+        if r.returncode==0 and norm.exists():
+            norm_clips.append(str(norm))
+        else:
+            norm_clips.append(c)
+
     concat_list = WORK/"concat.txt"
-    concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in clips))
+    concat_list.write_text('\n'.join(f"file '{Path(c).resolve()}'" for c in norm_clips))
     raw_video = WORK/"video_raw.mp4"
     r = subprocess.run(["ffmpeg","-y","-f","concat","-safe","0",
         "-i",str(concat_list.resolve()),"-c:v","copy",str(raw_video)],
@@ -512,9 +579,9 @@ def main():
 
     topic=params["topic"]; music_hint=params["music_hint"]
     duration=params["duration"]; img_count=params["img_count"]
-    pub_iso=params["publish_iso"]
+    efekt_sayisi=params["efekt_sayisi"]; pub_iso=params["publish_iso"]
 
-    tg(f"<b>{topic}</b> | {duration} min | {img_count} images\n🎵 {music_hint}\n📅 {pub_iso}","📋")
+    tg(f"<b>{topic}</b> | {duration}min | {img_count} imgs | {efekt_sayisi} effects\n📅 {pub_iso}","📋")
     try:
         meta        = generate_content(topic, duration, img_count)
         music       = generate_music(topic, duration*60, music_hint)
@@ -522,7 +589,7 @@ def main():
         generate_thumbnail(meta["thumbnail_prompt"],meta["thumbnail_text"],meta["color"],topic)
         audio,dur,srt = generate_audio(meta["script"])
         final_audio = mix_audio(audio, music, dur)
-        video       = assemble_video(images, final_audio, srt, dur)
+        video       = assemble_video(images, final_audio, srt, dur, efekt_sayisi)
         vid_id      = upload_youtube(video, meta, pub_iso)
         upload_thumbnail(vid_id, str(WORK/"thumbnail.jpg"))
         tg(f"✅ DONE!\nyoutube.com/watch?v={vid_id}","🎬")
